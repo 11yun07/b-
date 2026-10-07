@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>B站舆论分析工具</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js"></script>
+</head>
+<body>
+<header class="navbar">
+  <div class="brand">📊 B站舆论分析工具</div>
+  <div class="nav-actions">
+    <button class="btn primary" onclick="downloadReport()">📄 下载报告</button>
+    <button class="btn" onclick="refreshCharts()">🔄 刷新图表</button>
+    <button class="btn" onclick="openSettings()">⚙️ 设置</button>
+  </div>
+</header>
+
+<main class="container">
+  <!-- ① 搜索区 -->
+  <section class="card" id="search-section">
+    <h2>① 搜索视频 <span class="hint">（使用 Cookie）</span></h2>
+    <div class="search-row">
+      <input id="search-keyword" class="input grow" placeholder="输入关键词，如：某事件" />
+      <select id="search-order" class="input">
+        <option value="totalrank">综合排序</option>
+        <option value="click">最多播放</option>
+        <option value="pubdate">最新发布</option>
+        <option value="dm">最多弹幕</option>
+        <option value="stow">最多收藏</option>
+      </select>
+      <label class="inline-label">页数
+        <input id="search-pages" class="input w60" type="number" min="1" max="10" value="3" />
+      </label>
+      <button id="search-btn" class="btn primary" onclick="doSearch()">搜索</button>
+    </div>
+  </section>
+
+  <!-- ② 视频列表 -->
+  <section class="card" id="videos-section">
+    <div class="section-head">
+      <h2>② 选择视频</h2>
+      <div class="row-actions">
+        <span id="selected-count" class="hint">已选 0 个</span>
+        <button class="btn sm" onclick="selectAll(true)">全选</button>
+        <button class="btn sm" onclick="selectAll(false)">全不选</button>
+        <button class="btn sm" onclick="invertSelect()">反选</button>
+        <button class="btn primary" onclick="crawlComments()">采集评论</button>
+        <button class="btn primary" onclick="crawlDanmaku()">采集弹幕</button>
+        <button class="btn danger" onclick="stopComment()">停止评论</button>
+        <button class="btn danger" onclick="stopDanmaku()">停止弹幕</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>标题</th><th>UP主</th><th>BV号</th><th>播放</th>
+            <th>弹幕</th><th>评论</th><th>时长</th><th>发布时间</th>
+          </tr>
+        </thead>
+        <tbody id="video-tbody">
+          <tr><td colspan="9" class="empty">暂无搜索结果</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ③ 进度与缓存 -->
+  <section class="card" id="progress-section">
+    <h2>③ 采集进度与缓存区</h2>
+    <div class="progress-grid">
+      <div class="progress-item">
+        <div class="progress-label">评论采集：<span id="comment-msg">空闲</span> <span id="comment-pct">0%</span></div>
+        <div class="progress"><div id="comment-bar" class="progress-fill blue"></div></div>
+      </div>
+      <div class="progress-item">
+        <div class="progress-label">弹幕采集：<span id="danmaku-msg">空闲</span> <span id="danmaku-pct">0%</span></div>
+        <div class="progress"><div id="danmaku-bar" class="progress-fill orange"></div></div>
+      </div>
+    </div>
+    <div class="params-row">
+      <label class="inline-label">评论排序
+        <select id="comment-mode" class="input">
+          <option value="3">热门</option>
+          <option value="2">时间</option>
+        </select>
+      </label>
+      <label class="inline-label">最大条数(0=不限)
+        <input id="max-count" class="input w80" type="number" value="0" min="0" />
+      </label>
+      <label class="inline-label">请求间隔(秒)
+        <input id="delay-input" class="input w80" type="number" value="1" step="0.1" min="0.3" />
+      </label>
+    </div>
+    <div class="cache-head">
+      <div class="cache-tabs">
+        <button class="cache-tab active" data-tab="comment" onclick="switchCacheTab('comment')">评论缓存</button>
+        <button class="cache-tab" data-tab="danmaku" onclick="switchCacheTab('danmaku')">弹幕缓存</button>
+      </div>
+      <div class="row-actions">
+        <button class="btn sm" onclick="doExport('csv')">保存为CSV</button>
+        <button class="btn sm" onclick="doExport('json')">保存为JSON</button>
+        <button class="btn sm" onclick="doExport('sqlite')">存入数据库</button>
+        <button class="btn sm danger" onclick="clearCache()">清空缓存</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="cache-table">
+        <thead id="cache-thead"></thead>
+        <tbody id="cache-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ④ 图表区 -->
+  <section class="card" id="charts-section">
+    <h2>④ 舆情分析图表</h2>
+    <div class="charts-grid">
+      <div class="chart-card">
+        <h3>情感分布</h3>
+        <div id="chart-sentiment-pie" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>情感趋势</h3>
+        <div id="chart-sentiment-line" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>用户等级分布</h3>
+        <div id="chart-level" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>评论词云</h3>
+        <div id="chart-wordcloud-comment" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>弹幕词云</h3>
+        <div id="chart-wordcloud-danmaku" class="chart"></div>
+      </div>
+      <div class="chart-card wide">
+        <h3>弹幕视频内时间热力图</h3>
+        <div id="chart-heatmap" class="chart tall"></div>
+      </div>
+      <div class="chart-card">
+        <h3>评论互动散点</h3>
+        <div id="chart-scatter" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>高赞评论情绪判断</h3>
+        <div id="top-like-verdict" class="verdict"></div>
+        <ul id="top10-list" class="top10-list"><li class="empty">暂无热评</li></ul>
+      </div>
+      <div class="chart-card">
+        <h3>弹幕密度 × 情感</h3>
+        <div id="chart-overlay" class="chart"></div>
+      </div>
+      <div class="chart-card">
+        <h3>夸什么 vs 骂什么</h3>
+        <div class="two-col">
+          <div id="chart-opinion-pos" class="chart half"></div>
+          <div id="chart-opinion-neg" class="chart half"></div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <h3>🎬 名场面 / 高能时刻</h3>
+        <ul id="highlight-list" class="hl-list"><li class="empty">暂无弹幕数据</li></ul>
+      </div>
+      <div class="chart-card">
+        <h3>🧠 观点聚类</h3>
+        <ul id="cluster-list" class="cluster-list"><li class="empty">暂无评论数据</li></ul>
+      </div>
+      <div class="chart-card wide">
+        <h3>🏆 跨视频 PK 榜</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>视频</th><th>评论数</th><th>情感均值</th><th>正面</th><th>负面</th><th>均赞</th><th>争议度</th></tr></thead>
+            <tbody id="compare-body"><tr><td colspan="7" class="empty">暂无数据</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 设置弹窗 -->
+<div id="settings-modal" class="modal">
+  <div class="modal-box">
+    <h3>设置 Cookie</h3>
+    <p class="cookie-tip">⚠️ Cookie 仅用于搜索视频，不会用于评论/弹幕采集。</p>
+    <textarea id="cookie-input" class="cookie-input"
+      placeholder="粘贴浏览器 F12 获取的 Cookie（需包含 SESSDATA、bili_jct、buvid3）"></textarea>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSettings()">取消</button>
+      <button class="btn primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/js/charts/sentiment.js"></script>
+<script src="/js/charts/level.js"></script>
+<script src="/js/charts/wordcloud.js"></script>
+<script src="/js/charts/heatmap.js"></script>
+<script src="/js/charts/scatter.js"></script>
+<script src="/js/charts/overlay.js"></script>
+<script src="/js/charts/opinion.js"></script>
+<script src="/js/charts/highlight.js"></script>
+<script src="/js/charts/cluster.js"></script>
+<script src="/js/charts/compare.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>
