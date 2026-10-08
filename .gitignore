@@ -29,3 +29,5 @@ dist/
 Thumbs.db
 /bili-opinion-analyzer/data/
 /.dsh-pyenv/
+jieba.cache
+*.cache
